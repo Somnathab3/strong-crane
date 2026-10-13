@@ -1,0 +1,16 @@
+bin/
+data/*
+!data/reference_v7f4/
+!data/final_parts/
+!data/osm_layout/
+results/*
+!results/strong-crane_final.parquet
+!results/README.md
+__pycache__/
+*.pyc
+catboost_info/
+configs/paths.json
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+*.egg-info/

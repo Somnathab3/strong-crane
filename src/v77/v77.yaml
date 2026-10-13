@@ -1,0 +1,233 @@
+# v77: the V7f4 pipeline behind v117, step by step. Read by v77/stages.py and the notebook v77/v77_pipeline.ipynb.
+# Everything a run needs (inputs, settings) and everything it is checked against (reference results) is in this file.
+
+name: v77
+description: >
+  Standalone build of the V7f4 pipeline from the raw organiser files to the submission, stage by stage, plus the
+  LOBT window (a data property). No blending with other submissions, no copied rows, no score-fitted weights, no
+  non-open data layer. The stages that v111 / v117 added on top of this core are listed under excluded_steps.
+  The notebook trains everything (SMOKE = False); the pinned feature table reproduces the reference run, the build mode
+  rebuilds the table from the raw inputs first.
+
+inputs:
+  # features_mode:
+  #   pinned  read the fixed feature table the V7f4 run read (features_file below) - the reproduction path
+  #   build   build the table from the raw inputs with taxiout.run.load_features() (stage 1 from zero: organiser files,
+  #           ADS-B stand clocks, METAR, Open-Meteo, EUROCONTROL daily / monthly, ATFM, the extra inputs in data/extra).
+  #           The result is cached under out/cache/features_<hash>.parquet. Its hash differs from the pinned file because
+  #           the extra-inputs directory gained files after the pinned table was built, so stage results differ slightly.
+  features_mode: pinned
+  features_file: data/features/features_f391f7893a3cde99.parquet
+  features_bytes: 615319694
+  features_sha256: fcb6de88b34bbbdc33a17178c60fc899844d70faa6986dc42004f04160462e4a
+  verify_sha256: true            # ~3 s; set false to skip
+  # raw inputs (locations in configs/paths.json; configs/paths.example.json documents each). The ADS-B-derived inputs
+  # (adsb_clocks, data/extra) are precomputed from the adsb.lol trace archive by the taxiout pipeline and
+  # taxiout.build_extra; the raw traces (3-4 GB a day) are not kept on disk.
+  raw:
+    organiser: training_2025-*.parquet (12 months) + ranking.parquet + submitting.parquet
+    adsb_clocks: clock_<day>.parquet, one per day (stand clock, pushback signature, first point) - adsb.lol, ODbL
+    metar: hourly METAR per airport (NOAA / Iowa State archive)
+    open_meteo: open_meteo_hourly.parquet
+    eurocontrol: daily airport traffic / ATFM / taxi tables and monthly statistics (EUROCONTROL open data)
+    atfm: airport_arrival_atfm_delay.parquet
+    extra: taxi_<day>.parquet, stops/, stops2/, opdi_events.parquet, opdi_types.parquet, inbound.parquet, hotspots*.parquet
+  # the reference run's artefacts (reports, holdout predictions, submission) for the machine comparison of every stage
+  reference_run: data/reference_v7f4
+  # our own earlier submission files (not included in this repository; compared against only when present)
+  submissions_dir: data/submissions
+  # organiser raw files (for the LOBT window and the 2025 property check): taxiout.config.paths()["organiser"]
+
+# Settings exactly as the V7f4 run passed them to taxiout.run (everything else is the Settings default):
+#   --drop context,inbound,eu_monthly,seasonal,om_drift --family-airports "hotspots=EDDF,EHAM,LEBL;hotspots2=EDDF,EHAM,LEBL"
+#   --months 7 --set main_seeds=4 --set nb_skip_airports=LIRF --verbose 0 --tag v7f4
+settings:
+  holdout_months: [7]
+  drop: [context, inbound, eu_monthly, seasonal, om_drift]
+  family_airports:
+    hotspots: [EDDF, EHAM, LEBL]
+    hotspots2: [EDDF, EHAM, LEBL]
+  main_seeds: 4
+  nb_skip_airports: LIRF
+  verbose: 0
+  device: GPU                    # CPU gives byte-reproducible fits (slower)
+
+# v77 hedge options for the Rome stage (taxiout/lirf_regime.py), both OFF above so the reference reproduces exactly.
+# Measured by refitting the stage on the development months and applying it to the held-out month on V7f4's own
+# pre-stage predictions (July and January 2025; scripts r40 / r41 of the rome_stamp study). Enable by adding them to
+# `settings:` (or V77_HEDGE=1 in the notebook / `--hedge` in run_notebook.py).
+hedge_options:
+  lirf_regime_weighted: true       # classifier rows weighted by (gap - ordinary)^2: July 259.91 -> 258.27, January 326.24 -> 326.05
+  lirf_dayshift_ev: true           # expected value over day-shift / stamped / ordinary from 14 h on, crossing local midnight:
+                                   #   July 259.91 -> 255.36, January 326.24 -> 322.78 (both rest on a handful of day-shift rows)
+  # both together: July ~253, January ~322.7 (whole-holdout RMSE); Rome no-NM population 3,349 -> ~3,000 s in July
+  # rejected after the same test: calibration on squared taxi error (neutral), blend weight per gap band (July only)
+
+# Smoke run: the same code path on a share of the days with small models, to check the chain runs from stage 1 to the
+# final file. Its numbers are not comparable with the reference.
+smoke:
+  settings:
+    sample_days: 0.05
+    trees: 150
+    gate_trees: 100
+    lgb_trees: 100
+    spec_trees: 100
+    expert_trees: 100
+    main_seeds: 1
+    regime_seeds: 1
+    spec_seeds: 1
+    lirf_regime_seeds: 1
+
+lobt_window:
+  half_width_s: 3606             # |BLOCK - LOBT| <= 3606 s in all 2,062,577 departures of 2025 with a LOBT (0 exceptions)
+  note: >
+    the label lies in [MVT - LOBT - 3606, MVT - LOBT + 3606]; predictions outside are moved to the nearest edge.
+    v111 -> v117 moved 49 ranking rows (official 227.5058 -> 227.1727). Idea re-measured on our data after the
+    published repository EnioAguiar/prc-taxiout-2026.
+
+# Reference results of the V7f4 run (report_dev.json / report_submission.json), July 2025 held out: the stack fitted and
+# tuned on the other eleven months predicts July once. 190,713 rows. RMSE in seconds.
+reference:
+  git_commit: 6af9d9d7d01ee0d773cc9169ab9383765316daee+local-edits   # = c1b0d3e's taxiout (the local edits were committed there)
+  elapsed_s: 45100
+  holdout_july_2025:
+    anchor: 419.41
+    model_A: 353.35
+    model_A_neighbours: 349.51
+    lightgbm: 356.51
+    blend: 349.27
+    experts: 348.04
+    specialist: 262.03
+    final: 259.91
+  holdout_final_breakdown:
+    labels_le_2h: 232.38
+    nm_labels_le_2h: 209.54
+    nm_outside_lirf: 185.57
+    nm_lirf: 401.71
+    no_nm: 1076.50
+    no_nm_lirf: 3282.81
+    top10_sse_share: 0.1365
+    plausible_dropped_rows: 0
+  regime_check:
+    auc_all_candidates: 0.9761
+    auc_lirf_no_nm: 0.8953
+    lirf_no_nm_mean_p: 0.3810
+    lirf_no_nm_stamped_rate: 0.3264
+  vs_v27_reference_holdout:        # an earlier model's holdout predictions, evaluation only
+    this_run: 259.92
+    reference: 284.01
+    this_run_nm: 211.06
+    reference_nm: 234.90
+    this_run_no_nm: 1077.02
+    reference_no_nm: 1136.08
+  submission_choices:
+    blend_weight_model_A: 0.8319
+    specialist_airports: {LIRF: lirf_delay}
+    expert_weights: {EDDF: 0.5, EDDM: 0.5, EGLL: 0.25, EHAM: 0.5, LEBL: 0.25, LEMD: 0.25, LFPG: 0.25, LIRF: 0.5, LSZH: 0.5, LTFM: 0.25}
+    gates:
+      nm: [EDDF, EDDM, EGLL, EHAM, LEBL, LEMD, LSZH, LTFM]
+      no_nm: [EDDF, EDDM, EHAM, LEBL, LEMD, LIRF, LSZH, LTFM]
+  ranking_stage_means:
+    anchor: 1031.05
+    model_A: 1041.52
+    model_A_neighbours: 1042.07
+    lightgbm: 1038.31
+    blend: 1040.09
+    experts: 1040.76
+    specialist: 1041.10
+    final: 1039.93
+  tolerance_rmse_s: 1.5            # GPU CatBoost is not byte-reproducible; one seed moves a month by ~3 RMSE, 4 seeds less
+
+# What v111 / v117 added on top of this core, and why each step is left out here.
+official_scores:
+  v111: 227.5058                   # the full recipe below
+  v117: 227.1727                   # v111 + LOBT window (49 rows)
+excluded_steps:
+  - step: 0.5 x v3 (v95) + 0.5 x V7 chain
+    kind: averaging of two model generations
+    reason: an ensemble effect, not a model stage
+  - step: V7.x layer (st2_/rec_ refit-top layer, development repository, v4 branch, on the out-of-fold rows)
+    kind: stacking layer in another repository
+    reason: lives outside taxiout; a candidate to port later, measured on its own
+  - step: LIRF round 1 transferred from v104 (rows copied wherever v104 differs from v99)
+    kind: copied values from another submission file
+    reason: lineage not traceable to code in this repository
+  - step: Rome rules + day-shift stages (development repository, v5 branch)
+    kind: deterministic 2025-fitted rules in the v5 worktree
+    reason: not in this package; the pipeline's own LIRF regime stage and NM day-shift rule ARE included
+  - step: ADS-B Exchange first-of-month layer (development repository, not part of this package)
+    kind: external data layer
+    reason: data not open-licensed
+
+# Final phase (final organiser files released 8 Oct 2026: January, February, June, July 2026, 670,790 departures; one blind
+# submission, deadline 14 Oct). Same code as above; only the organiser folder, the seeds and the dis_ family change. The
+# development pass still holds out July 2025 (comparable with V7f4's 259.91); the submission pass refits on all twelve 2025
+# months and predicts the 670,790 final rows. Nothing below is run by the notebook; the commands are the ones that were run.
+# stage 12 (src/v77/postprocess.py): reconciliation with EUROCONTROL's published daily pre-departure delay, the loaded
+# day shift and the orphan window; the loadings fitted on the V7f4 2025 out-of-fold predictions are data/final_parts/postprocess_fit.json
+postprocess:
+  daily_table: all_pre_departure_delays.parquet   # under paths eurocontrol; EUROCONTROL open data (SOURCES.md)
+  count_tolerance: 5                              # a day is reconciled when our departure count is within this of the published count
+  iterations: 8
+  bands_s: [900, 1800, 2700, 3600]                # schedule-gap bands of the loading groups (x delayed / not delayed)
+  loading_clip: [-0.5, 2.5]
+  orphan_airports: [LIRF, LTFM]
+  half_width_s: 3606
+  round_between_steps: true                       # the final file was built from the rounded reconciled file (make final reproduces it)
+  oof_2025: {before: 230.91, reconciled: 229.01, loaded: 228.85, with_orphan_window: 228.57}   # loadings leave-month-out
+  official_janjul: {reconciled: 212.054, loaded_and_orphan: 211.9611, ensemble_recomputed: 211.7286}   # v134, v136, v137 (v132 212.8457 before)
+
+final_phase:
+  organiser: >
+    PRC_ORGANISER=<final organiser folder>: the twelve 2025 training files + final_ranking.parquet saved as ranking.parquet
+    + final_submitting.parquet saved as submitting.parquet (no code change). ADS-B clocks and data/extra inputs extended to
+    February/June 2026; feature table built by taxiout.run (cache data/features/features_2fff7e0bcada78b2.parquet, 2,085,047
+    training + 670,790 final departures, 338 columns; not shipped).
+  runs:
+    final_v7f4_dis_s8:
+      run: 20261009T220050_drop-context-inbound-eu_monthly-seasonal-om_drift_final_v7f4_dis_s8
+      command: >
+        python -m taxiout.run --months 7 --drop context,inbound,eu_monthly,seasonal,om_drift
+        --family-airports "hotspots=EDDF,EHAM,LEBL;hotspots2=EDDF,EHAM,LEBL" --set nb_skip_airports=LIRF
+        --set main_seeds=8 --set spec_seeds=8 --set lirf_regime_seeds=5 --set regime_seeds=5 --set disruption=true
+        --tag final_v7f4_dis_s8
+      holdout_july_2025: 258.87
+    final_v7f4:
+      run: 20261008T222626_drop-context-inbound-eu_monthly-seasonal-om_drift_final_v7f4
+      command: >
+        python -m taxiout.run --months 7 --drop context,inbound,eu_monthly,seasonal,om_drift
+        --family-airports "hotspots=EDDF,EHAM,LEBL;hotspots2=EDDF,EHAM,LEBL" --set nb_skip_airports=LIRF
+        --set main_seeds=4 --tag final_v7f4
+      holdout_july_2025: 260.69          # V7f4 259.91 on the first organiser files; the difference sits in ~20 Rome no-NM rows
+      official_janjul: 231.7137          # v131 (its January/July rows + LOBT window)
+  postprocess: >
+    python src/v77/final_postprocess.py results/<run> <tag>   (LOBT window from the final ranking file; writes
+    results/final_runs/<tag>/strong-crane_final_<tag>.parquet, 670,790 rows in final_submitting order, and a January/July
+    file when paths ranking_template_jan_jul is set)
+  ensemble_blend_dis75:
+    weights: {final_v7f4_dis_s8: 0.75, final_v7f4: 0.25}   # chosen on 2025 only: 11-month OOF best 0.64, July best 0.79
+    how: >
+      round(0.75 x dis_s8 + 0.25 x final_v7f4) on the two runs' raw submission.parquet, then final_postprocess.py
+      (results/final_runs/build_blend_dis75.sh); July 2025 holdout 258.74
+    file_sha256: e59a9d0c389f9d3128daf141b9e0aee790983563e54c03969a70e719b475617b   # data/final_parts/blend_dis75_final.parquet
+    official_janjul: 230.6679          # v130
+  v3_rerun:
+    code: prc2026-clean, tag v3 (commit facec86), unchanged, run on the final organiser files (--months 1,7)
+    run: 20261010T230752
+    holdout_july_2025: 263.67          # January 2025: 322.79
+    file_sha256: 8da89e4023c7970ad8145ce1634d40ed45cd02bd411be4d285a25918dc1be1f0   # data/final_parts/v3_rerun_final.parquet
+  option_B: >
+    round(0.5 x v3part + 0.5 x blend_dis75), LOBT window; v3part = v95 on January/July rows, the v3 rerun on February/June
+    rows. sha256 e1d9d3810eefedf5d6c4f16a10b9b7e846c7bc8501f8166931a666d4612a9ebe (data/final_parts/option_B_final.parquet).
+    Its January/July rows equal v133 (229.0978) except 41 rows (<= 10 s: the LOBT window read from the final ranking file).
+  final_file:
+    composition: >
+      February/June rows: option B, then stage 12 (daily reconciliation, loaded day shift, orphan window), with the
+      ensemble's January/July rows (data/final_parts/janjul_ensemble.parquet) taking part in the stage. January/July rows:
+      the score-weighted ensemble recomputed with the post-processed scored files (data/final_parts/janjul_final.parquet;
+      211.7286 official; the member files are not included).
+    postprocess_steps: [reconcile, loaded, orphan]
+    command: make final FINAL_ORGANISER=<final organiser folder>   # src/v77/final_compose.py: rebuilds the file from the parts, checks the SHA
+    rows: 670790
+    sha256: 8776bb6cf4bbe9dfe0e539672cf762698dc0bf4c77f5b0c4339aabb703a8856b   # results/strong-crane_final.parquet
+    uploaded_utc: 2026-10-14T04:30:00Z  # receipt Succeeded, 670,790 pairs, blind (no score)

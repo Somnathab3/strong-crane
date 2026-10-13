@@ -1,0 +1,25 @@
+{
+  "_about": {
+    "how": "copy this file to configs/paths.json; relative paths are relative to the repository root, absolute paths work too; environment variables PRC_<KEY> override an entry",
+    "organiser": "the challenge files: training_2025-01-01_2025-02-01.parquet ... training_2025-12-01_2026-01-01.parquet (12 months), ranking.parquet, submitting.parquet",
+    "adsb_clocks": "one clock_<YYYY-MM-DD>.parquet per day: ADS-B stand clock, pushback signature, first ground point per departure (scripts/build_adsb_clocks.py builds them from the adsb.lol trace archive, ODbL; the raw traces it keeps under raw/<day>/ feed taxiout.build_extra)",
+    "metar": "one parquet per station: hourly METAR (scripts/download_metar.py writes here)",
+    "open_meteo": "open_meteo_hourly.parquet: Open-Meteo historical forecast per airport-hour (scripts/download_open_meteo.py --root <folder> writes it)",
+    "eurocontrol": "EUROCONTROL airport statistics: daily traffic and taxi tables and the monthly taxi-out statistics (parquet files)",
+    "atfm": "airport_arrival_atfm_delay.parquet: EUROCONTROL daily airport arrival ATFM delay",
+    "opdi": "OPDI (EUROCONTROL open data): flight_list/ and flight_events/ folders of monthly parquet files",
+    "extra": "the ADS-B-derived inputs built by python -m taxiout.build_extra: taxi_<day>.parquet, stops/, stops2/, opdi_events.parquet, opdi_types.parquet, inbound.parquet, hotspots.parquet, hotspots2.parquet",
+    "reference": "optional: an earlier model's holdout predictions (MVT_ID_mvt + one prediction column), used only to report a comparison; null to skip",
+    "ranking_template_jan_jul": "optional, final phase only: the January/July 2026 submitting.parquet (344,841 rows) of the first ranking set; src/v77/final_postprocess.py writes a January/July file in its order while PRC_ORGANISER points at the final organiser folder (null: that file is skipped)"
+  },
+  "organiser": "data/raw/organiser",
+  "adsb_clocks": "data/raw/adsb_clocks",
+  "metar": "data/raw/metar",
+  "open_meteo": "data/raw/open_meteo/open_meteo_hourly.parquet",
+  "eurocontrol": "data/raw/eurocontrol",
+  "atfm": "data/raw/eurocontrol/airport_arrival_atfm_delay.parquet",
+  "opdi": "data/raw/opdi",
+  "extra": "data/extra",
+  "reference": null,
+  "ranking_template_jan_jul": null
+}

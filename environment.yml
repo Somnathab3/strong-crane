@@ -1,0 +1,12 @@
+# conda environment with the exact versions every result was produced with (see requirements.txt)
+name: strong-crane
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt
+      - nbformat
+      - nbclient
+      - ipykernel

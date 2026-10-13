@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taxiout"
+version = "0.1.0"
+description = "strong-crane: taxi-out time from the raw organiser files to the submission, stage by stage (PRC Data Challenge 2026, team strong-crane)"
+requires-python = "==3.12.*"
+license = {text = "GPL-3.0-only"}
+dependencies = ["catboost==1.2.10", "numpy==2.5.3", "pandas==2.3.3", "pyarrow==24.0.0", "lightgbm==4.7.0", "scikit-learn==1.9.1", "scipy==1.18.1", "optuna==5.0.0", "pyyaml==6.0.3", "matplotlib==3.11.2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+v77 = ["v77.yaml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
